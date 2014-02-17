@@ -14,8 +14,9 @@
 using namespace std;
 
 vector<string> path(3);
-vector<float> fmeasure,recall,precision;  //to store the stastics
-// float fmeasure[88][20],recall[88][20],precision[88][20];
+string out_path="D:/workspace/project/result/result_0216/paraTuning/";
+//vector<float> fmeasure,recall,precision;  //to store the stastics
+
 
 char image_indice[88][30]; 
 int bin_num; 
@@ -33,6 +34,8 @@ float ***bkgCost=NULL;
 float ***fgCost=NULL;
 float lambdaxy[15]={0.1,0.3,0.5,0.7,0.9,1,3,5,7,9,11,13,15,17,19};
 float lambdaz[15]={0.1,0.3,0.5,0.7,0.9,1,3,5,7,9,11,13,15,17,19};
+int BinNum[20]={10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200};
+
 float ctBias[20]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
 float radiusRatio[10]={0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1};
 
@@ -282,6 +285,34 @@ void computeHist(float ***img,uchar ***mask,int *** BinID,int dims[3],int box[6]
 
 }
 
+void computeDataterm(int ***BinID, int*** pixelID,int box[6],float ***fgDataCost,float ***bkDataCost,vector<float> &fgProb, vector<float> &bkProb )
+{
+	 float SMALLCONST=1.0e-3;
+
+	 for(int s=box[0];s<=box[3];s++)
+		 for(int r=box[1];r<=box[4];r++)
+			 for(int c=box[2];c<=box[5];c++)
+			 {
+				node_id id=pixelID[s][r][c];
+				bin_id binID=BinID[s][r][c];
+				float fgCost=-log(fgProb[binID]+SMALLCONST);
+				float bkCost=-log(bkProb[binID]+SMALLCONST);
+                fgDataCost[s][r][c]=fgCost;
+				bkDataCost[s][r][c]=bkCost;
+			}
+	 
+}
+
+void constructDatatermFromMatrix(GraphType *g, int box[6],int ***pixelID,float ***fgDataCost, float ***bkDataCost)
+{
+	 for(int s=box[0];s<=box[3];s++)
+		 for(int r=box[1];r<=box[4];r++)
+			 for(int c=box[2];c<=box[5];c++)
+			 {
+                g->add_tweights(pixelID[s][r][c],bkDataCost[s][r][c],fgDataCost[s][r][c]);
+			}
+
+}
 
 void constructDataterm(GraphType *g,uchar ***mask,int ***BinID, int*** pixelID,int box[6],float ***dataterm,vector<float> &fgProb, vector<float> &bkProb )
 {
@@ -373,7 +404,7 @@ void computeNLink(float ***img,float ***smoothterm,float variance,float lambda, 
 		   }
 }
 
-void addNLinkFromMatrix(GraphType *g, int ***pixelID,float ***smoothterm, int box[6], int shift[3])
+void addNLinkFromMatrix(GraphType *g, int ***pixelID,float ***smoothterm, float lambda,int box[6], int shift[3])
 {
 	//used for parameters tuning, remove after tuning
 	//float ***sm=NULL;
@@ -390,38 +421,38 @@ void addNLinkFromMatrix(GraphType *g, int ***pixelID,float ***smoothterm, int bo
 		   {
 			   pixelID1=pixelID[s][r][c];
 			   pixelID2=pixelID[s+shift[0]][r+shift[1]][c+shift[2]];
-			   weight=smoothterm[s][r][c];
+			   weight=lambda*smoothterm[s][r][c];
 			   g->add_edge(pixelID1,pixelID2,weight,weight);
 		   }
 
 }
 
-void constructSmoothtermFromMatrix(GraphType *g,int ***pixelID,float ***Sx, float ***Sy,float ***Sz,int box[6],bool direction[3])
+void constructSmoothtermFromMatrix(GraphType *g,int ***pixelID,float ***Sx, float ***Sy,float ***Sz,float lambda_xy,float lambda_z,int box[6],bool direction[3])
 {
 	int sbox[6],shift[3];   //sbox: range of pixel1 for adding smoothterm ( g->add_edge(pixel1,pixel2,weight1,weight2) )
 
 	// n link for direction - on same slice
-	if(direction[2]){
+	if(direction[2] && lambda_xy!=0){
 	sbox[0]=box[0]; sbox[1]=box[1]; sbox[2]=box[2];
 	sbox[3]=box[3]; sbox[4]=box[4]; sbox[5]=box[5]-1;
 	shift[0]=0; shift[1]=0; shift[2]=1;
-	addNLinkFromMatrix(g,pixelID,Sx,sbox,shift);
+	addNLinkFromMatrix(g,pixelID,Sx,lambda_xy,sbox,shift);
 	}
 
 	// n link for direction | on same slice
-	if(direction[1]){
+	if(direction[1] && lambda_xy!=0){
 	sbox[0]=box[0]; sbox[1]=box[1]; sbox[2]=box[2];
 	sbox[3]=box[3]; sbox[4]=box[4]-1; sbox[5]=box[5];
 	shift[0]=0; shift[1]=1; shift[2]=0;
-	addNLinkFromMatrix(g,pixelID,Sy,sbox,shift);
+	addNLinkFromMatrix(g,pixelID,Sy,lambda_xy,sbox,shift);
 	}
 
 	// n link for direction | on different slices
-	if(direction[0]){
+	if(direction[0] && lambda_z!=0){
 	sbox[0]=box[0]; sbox[1]=box[1]; sbox[2]=box[2];
 	sbox[3]=box[3]-1; sbox[4]=box[4]; sbox[5]=box[5];
 	shift[0]=1; shift[1]=0; shift[2]=0;
-	addNLinkFromMatrix(g,pixelID,Sz,sbox,shift);
+	addNLinkFromMatrix(g,pixelID,Sz,lambda_z,sbox,shift);
 	}
 }
 
@@ -861,116 +892,108 @@ void setMaskCircularSeeds(uchar ***mask,vector<vector<int> > &seeds,int radius,i
 	}
 }
 
-void paraTuningForBinNumGlobalHist(float ***img,int dims[3],int segBox[6],float spacing[3],float variance,
-	float lambda_xy, float lambda_z, vector<vector<int> > &seeds3D, vector<vector<int> > &seeds2D, 
+
+
+void paraTuningForLocalHist(float ***img,int dims[3],int segBox[6],float spacing[3],float variance,
+	vector<vector<int> > &seeds3D, vector<vector<int> > &seeds2D, 
 	int ***BinID,int ***pixelID,uchar ***mask,float ***smoothterm,float ***dataterm,uchar ***labeling)
 {
-	    float ***Sx=create3DMat<float>(dims,0);
-		float ***Sy=create3DMat<float>(dims,0);
-		float ***Sz=create3DMat<float>(dims,0);
+	float ***Sx=create3DMat<float>(dims,0);
+	float ***Sy=create3DMat<float>(dims,0);
+	float ***Sz=create3DMat<float>(dims,0);
+	float ***bkDataCost=create3DMat<float>(dims,0);
+	float ***fgDataCost=create3DMat<float>(dims,0);
 
-	    //pixelID can be different because of different segmentation regions
-	    //pixelID is computed for every different region segmentation
-	    int appearanceBox[6]={segBox[0],0,0,segBox[3],dims[1]-1,dims[2]-1};   //box for appearance model
-	    int graphDims[3]={segBox[3]-segBox[0]+1,segBox[4]-segBox[1]+1,segBox[5]-segBox[2]+1};
-		int num_nodes=graphDims[0]*graphDims[1]*graphDims[2];
-	    int num_edges=10*num_nodes;  //set larger number 
-		computePixelID(pixelID,segBox,graphDims);  //compute pixelID for segBox
-	    GraphType *g=new GraphType(num_nodes,num_edges);
-	    bool direction[3]={true,true,true};
-		if(graphDims[0]==1) direction[0]=false;
-		computeSmoothterm(img,Sx,Sy,Sz,spacing,variance,lambda_xy,lambda_z,segBox,direction);
-
-		//begin of the tuning of bin num
-		int binNum=10; float re,pre,fm;
-		for(int i=0;i<20;i++){
-	    g->add_node(num_nodes);
-		hardConstraint(g,pixelID,segBox,mask);
-		if(graphDims[0]!=1){
-		  setStarShapeConstraint3D(g,pixelID,segBox,seeds3D);
-		}
-		setStarShapeConstraint2D(g,pixelID,segBox,seeds2D);
-		computeBinID(img,BinID,dims,bmin,bmax,binNum);
-		vector<float> fgProb(binNum,0); //histogram for foreground
-		vector<float> bkgProb(binNum,0); //histogram for background
-		computeHist(img,mask,BinID,dims,appearanceBox,fgProb,bkgProb);
-		constructDataterm(g,mask,BinID,pixelID,segBox,dataterm,fgProb,bkgProb);
-		constructSmoothtermFromMatrix(g,pixelID,Sx,Sy,Sz,segBox,direction);
-		float flow=g->maxflow();
-   //     printf("flow is %f\n",flow);
-		getLabeling(g,pixelID,labeling,segBox);
-	   
-	//fm=computeFmeasure(gt,labeling,re,pre,segBox);
- //   fmeasure[index][i]+=fm; recall[index][i]+=re; precision[index][i]+=pre;
-		g->reset();
-		binNum+=10;
-		}
-
-		delete g;
-		free3DMat<float>(Sx);
-		free3DMat<float>(Sy);
-		free3DMat<float>(Sz);
-
-}
-
-void paraTuningForBinNumLocalHist(float ***img,int dims[3],int segBox[6],float spacing[3],float variance,
-	float lambda_xy, float lambda_z, vector<vector<int> > &seeds3D, vector<vector<int> > &seeds2D, 
-	int ***BinID,int ***pixelID,uchar ***mask,float ***smoothterm,float ***dataterm,uchar ***labeling)
-{
-	    float ***Sx=create3DMat<float>(dims,0);
-		float ***Sy=create3DMat<float>(dims,0);
-		float ***Sz=create3DMat<float>(dims,0);
-
-	    //pixelID can be different because of different segmentation regions
-	    //pixelID is computed for every different region segmentation
+	//pixelID can be different because of different segmentation regions
+	//pixelID is computed for every different region segmentation
 	//    int appearanceBox[6]={segBox[0],0,0,segBox[3],dims[1]-1,dims[2]-1};   //box for appearance model
-	    int graphDims[3]={segBox[3]-segBox[0]+1,segBox[4]-segBox[1]+1,segBox[5]-segBox[2]+1};
-		int num_nodes=graphDims[0]*graphDims[1]*graphDims[2];
-	    int num_edges=10*num_nodes;  //set larger number 
-		computePixelID(pixelID,segBox,graphDims);  //compute pixelID for segBox
-	    GraphType *g=new GraphType(num_nodes,num_edges);
-	    bool direction[3]={true,true,true};
-		if(graphDims[0]==1) direction[0]=false;
-		computeSmoothterm(img,Sx,Sy,Sz,spacing,variance,lambda_xy,lambda_z,segBox,direction);
+	int graphDims[3]={segBox[3]-segBox[0]+1,segBox[4]-segBox[1]+1,segBox[5]-segBox[2]+1};
+	int num_nodes=graphDims[0]*graphDims[1]*graphDims[2];
+	int num_edges=10*num_nodes;  //set larger number 
+	computePixelID(pixelID,segBox,graphDims);  //compute pixelID for segBox
+	GraphType *g=new GraphType(num_nodes,num_edges);
+	bool direction[3]={true,true,true};
+	if(graphDims[0]==1) direction[0]=false;
 
-		//begin of the tuning of bin num
-		int binNum=10; float re,pre,fm;
-		for(int i=0;i<20;i++){
-	    g->add_node(num_nodes);
-		hardConstraint(g,pixelID,segBox,mask);
-		if(graphDims[0]!=1){
-		  setStarShapeConstraint3D(g,pixelID,segBox,seeds3D);
-		}
-		setStarShapeConstraint2D(g,pixelID,segBox,seeds2D);
+	//smoothterm cost for lambda_xy=1, lambda_z=1
+	computeSmoothterm(img,Sx,Sy,Sz,spacing,variance,1,1,segBox,direction);
+
+	float fmeasure[20][15][15],recall[20][15][15],precision[20][15][15];
+	//begin of the tuning of bin num
+	int binNum; float re,pre,fm;
+	float curr_lambda_xy,curr_lambda_z, last_lambda_xy=0,last_lambda_z=0;
+
+	for(int iter_bin=0;iter_bin<20;iter_bin++){
+		binNum=BinNum[iter_bin];
 		computeBinID(img,BinID,dims,bmin,bmax,binNum);
 		vector<float> fgProb(binNum,0); //histogram for foreground
 		vector<float> bkgProb(binNum,0); //histogram for background
-	//	computeHist(img,mask,BinID,dims,appearanceBox,fgProb,bkgProb);
 
 		for(int i=segBox[0];i<=segBox[3];i++){
 			int appearanceBox[6]={i,0,0,i,dims[1]-1,dims[2]-1};   //box for appearance model
 			int localBox[6]={i,segBox[1],segBox[2],i,segBox[4],segBox[5]};
-		    computeHist(img,mask,BinID,dims,appearanceBox,fgProb,bkgProb);
-		    constructDataterm(g,mask,BinID,pixelID,localBox,dataterm,fgProb,bkgProb);
+			computeHist(img,mask,BinID,dims,appearanceBox,fgProb,bkgProb);
+			computeDataterm(BinID,pixelID,localBox,fgDataCost,bkDataCost,fgProb,bkgProb);
 		}
 
-		constructSmoothtermFromMatrix(g,pixelID,Sx,Sy,Sz,segBox,direction);
-		float flow=g->maxflow();
-   //     printf("flow is %f\n",flow);
-		getLabeling(g,pixelID,labeling,segBox);
-	   
-	//fm=computeFmeasure(gt,labeling,re,pre,segBox);
- //   fmeasure[index][i]+=fm; recall[index][i]+=re; precision[index][i]+=pre;
-		g->reset();
-		binNum+=10;
+		for(int iter_lz=0;iter_lz<15;iter_lz++){
+			g->add_node(num_nodes);
+			//unary term
+			hardConstraint(g,pixelID,segBox,mask);
+			constructDatatermFromMatrix(g,segBox,pixelID,fgDataCost,bkDataCost);
+
+			//pair wise term
+			//star shape constraint
+			if(graphDims[0]!=1){
+				setStarShapeConstraint3D(g,pixelID,segBox,seeds3D);
+			}
+			setStarShapeConstraint2D(g,pixelID,segBox,seeds2D);
+
+			//smoothness term
+			last_lambda_xy=0;
+			curr_lambda_z=lambdaz[iter_lz];
+			constructSmoothtermFromMatrix(g,pixelID,Sx,Sy,Sz,0,curr_lambda_z,segBox,direction);
+
+			for(int iter_lxy=0;iter_lxy<15;iter_lxy++){
+				curr_lambda_xy=lambdaxy[iter_lxy];
+				float add_lambda_xy=curr_lambda_xy-last_lambda_xy;
+				constructSmoothtermFromMatrix(g,pixelID,Sx,Sy,Sz,add_lambda_xy,0,segBox,direction);
+				float flow=g->maxflow();
+				//     printf("flow is %f\n",flow);
+				getLabeling(g,pixelID,labeling,segBox);
+
+				fm=computeFmeasure(gt,labeling,re,pre,segBox);
+				fmeasure[iter_bin][iter_lxy][iter_lz]=fm; 
+				recall[iter_bin][iter_lxy][iter_lz]=re; 
+				precision[iter_bin][iter_lxy][iter_lz]=pre;
+
+				last_lambda_xy=curr_lambda_xy;
+			}
+			g->reset();
 		}
 
-		delete g;
-		free3DMat<float>(Sx);
-		free3DMat<float>(Sy);
-		free3DMat<float>(Sz);
+	}
+
+	delete g;
+	free3DMat<float>(Sx);
+	free3DMat<float>(Sy);
+	free3DMat<float>(Sz);
+	free3DMat<float>(fgDataCost);
+	free3DMat<float>(bkDataCost);
+
+	string fmfile=out_path+"fmeasure/"+string(image_indice[index])+".txt";
+	string refile=out_path+"recall/"+string(image_indice[index])+".txt";
+	string prefile=out_path+"precision/"+string(image_indice[index])+".txt";
+	int statDim[3]={20,15,15};
+
+	write3DMat<float>(fmfile.c_str(),(float *)fmeasure,dims);
+	write3DMat<float>(refile.c_str(),(float *)recall,dims);
+	write3DMat<float>(prefile.c_str(),(float *)precision,dims);
 
 }
+
+
+
 void segmentGlobalHist(float ***img,int dims[3],int segBox[6],float spacing[3],float variance,int binNum,
 	float lambda_xy, float lambda_z,int iter_times, vector<vector<int> > &seeds3D, vector<vector<int> > &seeds2D, 
 	int ***BinID,int ***pixelID,uchar ***mask,float ***smoothterm,float ***dataterm,uchar ***labeling)
@@ -1191,18 +1214,18 @@ void segmentation(float ***img,uchar ***gt, int dims[3],int box_fg[6],float spac
 //	segmentGlobalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
 	
 	
-	int adaptiveSegBox[6]={tightBox[0],segBox[1],segBox[2],tightBox[3],segBox[4],segBox[5]};
-	lambda_xy=segmentAdaptiveLambdaXY(img,dims,adaptiveSegBox,tightBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
-	segmentGlobalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
-	
+	//int adaptiveSegBox[6]={tightBox[0],segBox[1],segBox[2],tightBox[3],segBox[4],segBox[5]};
+	//lambda_xy=segmentAdaptiveLambdaXY(img,dims,adaptiveSegBox,tightBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+	//segmentGlobalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+	//
 
 //	paraTuningForBinNumGlobalHist(img,dims,segBox,spacing,variance,lambda_xy,lambda_z,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
-//	paraTuningForBinNumLocalHist(img,dims,segBox,spacing,variance,lambda_xy,lambda_z,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+	paraTuningForLocalHist(img,dims,segBox,spacing,variance,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
 	
-	float re,pre,fm;
-	fm=computeFmeasure(gt,labeling,re,pre,box);
-	printf("recall: %f precision: %f fm: %f \n",re,pre,fm);
-	recall.push_back(re); precision.push_back(pre); fmeasure.push_back(fm);
+	//float re,pre,fm;
+	//fm=computeFmeasure(gt,labeling,re,pre,box);
+	//printf("recall: %f precision: %f fm: %f \n",re,pre,fm);
+	//recall.push_back(re); precision.push_back(pre); fmeasure.push_back(fm);
 
 	free3DMat<uchar>(mask);
 	free3DMat<int>(BinID);
@@ -1246,6 +1269,7 @@ void paraTuningAddDataTerm(GraphType *g, float ***fgCost, float ***bkgCost,int d
 
 int main(int argc, char **argv)
 {
+
 	//int st,ed;
    int st=atoi(argv[1]); int ed=atoi(argv[2]);
    readImgIndice("D:/workspace/project/crop3D/recrop/TOMOB2INT_CROP/image_name.txt");
@@ -1253,7 +1277,6 @@ int main(int argc, char **argv)
 
    int img_num=0;
    float lambdaBias=1; float lambda_xy=5, lambda_z=7;
-   string out_path="D:/workspace/project/result/result_0210/adaptiveGlobalHist/";
 
    //string out_file(argv[3]);
    //string outFM=out_path+out_file+"_fm.txt";
@@ -1277,8 +1300,9 @@ int main(int argc, char **argv)
 
 	readInData(string(image_indice[i]));
 	printf("dimension is: %d %d %d\n",dims[0],dims[1],dims[2]);
-	//if(dims[0]*dims[1]*dims[2]<=190000) 
-	//{ FreeMatrix3D<float>(img,dims); FreeMatrix3D<uchar>(gt,dims); printf("image is too large, skip\n"); continue;}
+	if(dims[0]*dims[1]*dims[2]>100000)  //trained on 65 volumes  
+	{ free3DMat<float>(img); free3DMat<uchar>(gt); printf("image is too large, skip\n"); continue;}
+
 	int box[6]={0,0,0,dims[0]-1,dims[1]-1,dims[2]-1};
 	bmin=min3D<float>(img,box); 
 	bmax=max3D<float>(img,box);
@@ -1290,7 +1314,7 @@ int main(int argc, char **argv)
 	segmentation(img,gt,dims,box_fg,spacing,lambda_xy,lambda_z,binNum);
 	t2=clock();
     float diff ((float)t2-(float)t1);
-	printf("running time is%f sec\n\n",diff/CLOCKS_PER_SEC);
+	printf("running time is: %f sec\n\n",diff/CLOCKS_PER_SEC);
    
 	// free allocated memory
 	free3DMat<float>(img);
@@ -1317,10 +1341,11 @@ int main(int argc, char **argv)
    fclose(fidPE);
    */
 
-   float avgRecall=std::accumulate(recall.begin(),recall.end(),0.0)/recall.size();
-   float avgPrecision=std::accumulate(precision.begin(),precision.end(),0.0)/precision.size();
-   float avgFmeasure=std::accumulate(fmeasure.begin(),fmeasure.end(),0.0)/fmeasure.size();
-   printf("average recall: %f, precision: %f, fmeasure: %f\n",avgRecall, avgPrecision, avgFmeasure);
+   //float avgRecall=std::accumulate(recall.begin(),recall.end(),0.0)/recall.size();
+   //float avgPrecision=std::accumulate(precision.begin(),precision.end(),0.0)/precision.size();
+   //float avgFmeasure=std::accumulate(fmeasure.begin(),fmeasure.end(),0.0)/fmeasure.size();
+   //printf("average recall: %f, precision: %f, fmeasure: %f\n",avgRecall, avgPrecision, avgFmeasure);
+
 	return 1;
 }
 

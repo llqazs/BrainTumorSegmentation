@@ -58,23 +58,23 @@ void writeData(string path,string filename,int dims[3],int segBox[6],uchar ***la
 			normalize3D<float>(smoothterm,segBox,0,255);
 			uchar*** smoothUint8=create3DMat<uchar>(dims,0);
 			set3DMat<uchar,float>(smoothUint8,smoothterm,segBox);
-			write3DMat<uchar>(smoothName.c_str(),smoothUint8,dims);
+			write3DMat<uchar>(smoothName.c_str(),smoothUint8[0][0],dims);
 			free3DMat<uchar>(smoothUint8);
 		}
-		else write3DMat<float>(smoothName.c_str(),smoothterm,dims);
+		else write3DMat<float>(smoothName.c_str(),smoothterm[0][0],dims);
 	}
 	if(dataterm){
 		if(uint8) {
 			normalize3D<float>(dataterm,segBox,0,255);
 			uchar*** dataUint8=create3DMat<uchar>(dims,0);
 			set3DMat<uchar,float>(dataUint8,dataterm,segBox);
-			write3DMat<uchar>(dataName.c_str(),dataUint8,dims);
+			write3DMat<uchar>(dataName.c_str(),dataUint8[0][0],dims);
 			free3DMat<uchar>(dataUint8);
 		}
-		else write3DMat<float>(dataName.c_str(),dataterm,dims);
+		else write3DMat<float>(dataName.c_str(),dataterm[0][0],dims);
 	}
 	if(labeling)
-	write3DMat<uchar>(segName.c_str(),labeling,dims);
+	write3DMat<uchar>(segName.c_str(),labeling[0][0],dims);
 
 	FILE *fid=fopen(seedsName.c_str(),"wt");
 	fprintf(fid,"%d 3 0\n",seeds2D.size());

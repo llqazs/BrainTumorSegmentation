@@ -95,15 +95,15 @@ T ***read3DMat(const char *file,int dims[3])
 
 
 template<typename T>
-void write3DMat(const char *file,T*** mat, int dims[3])
+void write3DMat(const char *file,T* mat, int dims[3])
 {
 	if(file==NULL) {fputs("No file for written",stderr); exit(0);}
-	if(mat[0][0]==NULL) {fputs("empty matrix",stderr); exit(0);}
+	if(mat==NULL) {fputs("empty matrix",stderr); exit(0);}
 
 	FILE* pFile=fopen ( file , "wb" );
     if (pFile==NULL) {fputs ("File error",stderr); exit (0);}
 
-	fwrite(mat[0][0],sizeof(T),(unsigned int)(dims[0]*dims[1]*dims[2]),pFile);
+	fwrite(mat,sizeof(T),(unsigned int)(dims[0]*dims[1]*dims[2]),pFile);
 	fclose(pFile);
 
 }
