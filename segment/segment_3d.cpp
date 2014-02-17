@@ -892,7 +892,10 @@ void setMaskCircularSeeds(uchar ***mask,vector<vector<int> > &seeds,int radius,i
 	}
 }
 
-
+void markAllNodes(GraphType *g, int num_nodes)
+{
+	for(int i=0;i<num_nodes;i++) g->mark_node(i);
+}
 
 void paraTuningForLocalHist(float ***img,int dims[3],int segBox[6],float spacing[3],float variance,
 	vector<vector<int> > &seeds3D, vector<vector<int> > &seeds2D, 
@@ -968,6 +971,7 @@ void paraTuningForLocalHist(float ***img,int dims[3],int segBox[6],float spacing
 				precision[iter_bin][iter_lxy][iter_lz]=pre;
 
 				last_lambda_xy=curr_lambda_xy;
+				markAllNodes(g,num_nodes);
 			}
 			g->reset();
 		}
@@ -1083,11 +1087,6 @@ void segmentLocalHist(float ***img,int dims[3],int segBox[6],float spacing[3],fl
 
 		delete g;
 
-}
-
-void markAllNodes(GraphType *g, int num_nodes)
-{
-	for(int i=0;i<num_nodes;i++) g->mark_node(i);
 }
 
 //data term and starshape constraint should have been added into the graph *g
@@ -1300,7 +1299,7 @@ int main(int argc, char **argv)
 
 	readInData(string(image_indice[i]));
 	printf("dimension is: %d %d %d\n",dims[0],dims[1],dims[2]);
-	if(dims[0]*dims[1]*dims[2]>100000)  //trained on 65 volumes  
+	if(dims[0]*dims[1]*dims[2]>60000)  //trained on 65 volumes  
 	{ free3DMat<float>(img); free3DMat<uchar>(gt); printf("image is too large, skip\n"); continue;}
 
 	int box[6]={0,0,0,dims[0]-1,dims[1]-1,dims[2]-1};
