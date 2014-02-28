@@ -97,11 +97,13 @@ T ***read3DMat(const char *file,int dims[3])
 template<typename T>
 void write3DMat(const char *file,T* mat, int dims[3])
 {
-	if(file==NULL) {fputs("No file for written",stderr); exit(0);}
-	if(mat==NULL) {fputs("empty matrix",stderr); exit(0);}
+	if(file==NULL) {printf("No file for written\n"); exit(0);}
+	if(mat==NULL) {printf("empty matrix\n"); exit(0);}
+
+	int size=dims[0]*dims[1]*dims[2];
 
 	FILE* pFile=fopen ( file , "wb" );
-    if (pFile==NULL) {fputs ("File error",stderr); exit (0);}
+    if (pFile==NULL) {printf("File error\n"); exit (0);}
 
 	fwrite(mat,sizeof(T),(unsigned int)(dims[0]*dims[1]*dims[2]),pFile);
 	fclose(pFile);
@@ -181,5 +183,18 @@ void set3DMat(Tdst ***dst,Tsrc ***src,int box[6])
 			}
 
 }
+
+//set a slice of the mat dst from a slice of src
+template<typename T>
+void set3DMat(T ***dst, T ***src, int dst_z, int src_z, int dims[3])
+{
+	for(int r=0;r<dims[1];r++)
+		for(int c=0;c<dims[2];c++)
+		{
+			dst[dst_z][r][c]=src[src_z][r][c];
+		}
+
+}
+
 
 #endif

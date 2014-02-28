@@ -14,8 +14,8 @@
 using namespace std;
 
 vector<string> path(3);
-string out_path="D:/workspace/project/result/result_0216/paraTuning/";
-//vector<float> fmeasure,recall,precision;  //to store the stastics
+string out_path="D:/workspace/project/result/result_0224/adaptive_3D_small_hdcst/";
+vector<float> fmeasure,recall,precision;  //to store the stastics
 
 
 char image_indice[88][30]; 
@@ -193,6 +193,7 @@ void setMaskShiftBoxWithFgHdCst(uchar ***mask,int dims[3],int box_fg[6],vector<v
 	//set hard constraint for foreground
 	int size_fg[3]={box_fg[3]-box_fg[0]+1,box_fg[4]-box_fg[1]+1,box_fg[5]-box_fg[2]+1};
 	int halfsize_hdfg[3]={size_fg[0]/6,size_fg[1]/6,size_fg[2]/6};
+  //  int halfsize_hdfg[3]={1,1,0}; //hdcst size of 2
 	int center[3]={dims[0]/2,dims[1]/2,dims[2]/2};
 	int box_hdfg[6]={center[0]-halfsize_hdfg[0],center[1]-halfsize_hdfg[1],center[2]-halfsize_hdfg[2],center[0]+halfsize_hdfg[0],center[1]+halfsize_hdfg[1],center[2]+halfsize_hdfg[2]};
 //	printf("hdbox %d %d %d %d %d %d\n",box_hdfg[0],box_hdfg[1],box_hdfg[2],box_hdfg[3],box_hdfg[4],box_hdfg[5]);
@@ -232,7 +233,7 @@ void setMaskShiftBox(uchar ***mask, int dims[3], int box_fg[6],vector<vector<int
 
 }
 
-void setMask(uchar ***mask, int dims[3], int box_fg[3],vector<vector<int> > &seedsSide,int num_layer)
+void setMask(uchar ***mask, int dims[3], int box_fg[3])
 {
 	int box_bk[6]={0,0,0,dims[0]-1,dims[1]-1,dims[2]-1};
 	if(mask[0][0][0]!=HDBACKGROUND) setValueInsideCube<uchar>(mask,dims,box_bk,HDBACKGROUND);
@@ -990,9 +991,9 @@ void paraTuningForLocalHist(float ***img,int dims[3],int segBox[6],float spacing
 	string prefile=out_path+"precision/"+string(image_indice[index])+".txt";
 	int statDim[3]={20,15,15};
 
-	write3DMat<float>(fmfile.c_str(),(float *)fmeasure,dims);
-	write3DMat<float>(refile.c_str(),(float *)recall,dims);
-	write3DMat<float>(prefile.c_str(),(float *)precision,dims);
+	write3DMat<float>(fmfile.c_str(),(float *)fmeasure,statDim);
+	write3DMat<float>(refile.c_str(),(float *)recall,statDim);
+	write3DMat<float>(prefile.c_str(),(float *)precision,statDim);
 
 }
 
@@ -1122,7 +1123,24 @@ void adaptiveLambdaXY(GraphType *g,float ***img,int box[6], int targetVolume,flo
 
 }
 
-float segmentAdaptiveLambdaXY(float ***img,int dims[3],int box[6],int tightBox[6],float spacing[3],float variance,int binNum,
+float perimeter2D(uchar ***shape,int box[6])
+{
+	float perimeter_length=0;
+	for(int s=box[0];s<=box[3];s++)
+		for(int r=box[1];r<=box[4];r++)
+			for(int c=box[2];c<=box[5];c++)
+			{
+				if(shape[s][r][c]==0) continue;
+				if(shape[s][r+1][c]==0 || shape[s][r-1][c]==0 || shape[s][r][c+1]==0 || shape[s][r][c-1]==0)
+					perimeter_length+=1;
+
+			}
+
+	return perimeter_length;
+
+}
+
+float segmentAdaptiveLambdaXY(float ***img,int dims[3],int box[6],int tightBox[6],float spacing[3],int binNum,
 	float lambda_xy, float lambda_z,int iter_times, vector<vector<int> > &seeds3D, vector<vector<int> > &seeds2D, 
 	int ***BinID,int ***pixelID,uchar ***mask,float ***smoothterm,float ***dataterm,uchar ***labeling)
 {
@@ -1130,7 +1148,10 @@ float segmentAdaptiveLambdaXY(float ***img,int dims[3],int box[6],int tightBox[6
 	    //pixelID is computed for every different region segmentation
 	    
 	    int appearanceBox[6]={box[0],0,0,box[3],dims[1]-1,dims[2]-1};   //box for appearance model
-		
+	    int rlt_dims[3]={15,dims[1],dims[2]};
+	    uchar ***result=create3DMat<uchar>(rlt_dims,0);  //data to store the result of each iteration
+
+		float variance=computeImageVarianceXY(img, box);
 	    int graphDims[3]={box[3]-box[0]+1,box[4]-box[1]+1,box[5]-box[2]+1};
 		int num_nodes=graphDims[0]*graphDims[1]*graphDims[2];
 	    int num_edges=10*num_nodes;  //set larger number 
@@ -1138,22 +1159,57 @@ float segmentAdaptiveLambdaXY(float ***img,int dims[3],int box[6],int tightBox[6
 		vector<float> bkgProb(binNum,0); //histogram for background
 		computePixelID(pixelID,box,graphDims);  //compute pixelID for segBox
 	    GraphType *g=new GraphType(num_nodes,num_edges);
-	    bool direction[3]={true,true,true};
+	    bool direction[3]={false,true,true};
 		if(graphDims[0]==1) direction[0]=false;
 
 	    g->add_node(num_nodes);
 		hardConstraint(g,pixelID,box,mask);
 		//setStarShapeConstraint3D(g,pixelID,segBox,seeds3D);
 		setStarShapeConstraint2D(g,pixelID,box,seeds2D);
-		computeHist(img,mask,BinID,dims,appearanceBox,fgProb,bkgProb);
+		computeHist(img,mask,BinID,dims,box,fgProb,bkgProb);  //use larger box for bk appearance
 		constructDataterm(g,mask,BinID,pixelID,box,dataterm,fgProb,bkgProb);
+
 		int targetVolume=(tightBox[4]-tightBox[1]+1)*(tightBox[5]-tightBox[2]+1);
-		int bestVolume=0; float bestLambdaXY=0;
-		adaptiveLambdaXY(g,img,box,targetVolume,spacing,0.1,10,0,pixelID,labeling,bestVolume,bestLambdaXY);
+		float bestVolume=0; float bestLambdaXY=0;
+		float bestCompactness=100; float bestLength;
+		int minDiff=INT_MAX; 
+		float curr_lambda,add_lambda,last_lambda=0;
+		float best_fm=0; float fm,re,pre;
+		for(int i=0;i<15;i++){
+			curr_lambda=lambdaxy[i];
+			add_lambda=curr_lambda-last_lambda;
+			constructSmoothterm(g,img,pixelID,NULL,spacing,variance,add_lambda,0,box,direction);
+		    float flow=g->maxflow();
+		    float volume=(float)getLabeling(g,pixelID,labeling,box);
+			float perimeter_length=perimeter2D(labeling,box);
+			float compactness=perimeter_length/volume;
+			
+		printf("targetVolume %d, lambdaXY: %f, volume: %f length: %f, compact: %f\n",targetVolume,curr_lambda,volume,perimeter_length,compactness);
+	   if(compactness<bestCompactness && volume>(float)targetVolume/3){
+		    bestCompactness=compactness;
+			bestLambdaXY=curr_lambda;
+            bestLength=perimeter_length;
+			bestVolume=volume;
+			fm=computeFmeasure(gt,labeling,re,pre,box);
+			best_fm=fm;
+			
+		}
+			    
+		set3DMat<uchar>(result,labeling,i,box[0],dims);
+		markAllNodes(g,num_nodes);
+		}
+
+		string file=out_path+"segs/"+string(image_indice[index])+".txt";
+//		write3DMat<uchar>(file.c_str(),result[0][0],rlt_dims);
+		free3DMat<uchar>(result);
+		string maskFile=out_path+"mask/"+string(image_indice[index])+".txt";
+//		write3DMat<uchar>(maskFile.c_str(),mask[0][0],dims);
 		delete g;
-		printf("targetVolume %d, bestLambdaXY: %f, bestVolume: %d\n",targetVolume,bestLambdaXY,bestVolume);
+		printf("\ntargetVolume %d, bestLambdaXY: %f, bestCompactness: %f, bestLength: %f, bestVolume: %f, fmeasure: %f\n",targetVolume,bestLambdaXY,bestCompactness,bestLength, bestVolume,best_fm);
 		return bestLambdaXY;
 }
+
+
 
 
 void addDataterm(GraphType *g, int dims[3], int ***pixelID)
@@ -1208,23 +1264,36 @@ void segmentation(float ***img,uchar ***gt, int dims[3],int box_fg[6],float spac
 
 	int segBox[6]={box_fg[0],box_fg[1]-1,box_fg[2]-1,box_fg[3],box_fg[4]+1,box_fg[5]+1};
 
-	setMaskShiftBoxWithFgHdCst(mask,dims,box_fg,seeds2D,1); //no shift, no hd
-	setMaskCircularSeeds(mask,seedsSide,seedsize,HDFOREGROUND);
-//	segmentGlobalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+//	setMaskShiftBoxWithFgHdCst(mask,dims,box_fg,seeds2D,1); //no shift, no hd
+//	setMaskCircularSeeds(mask,seedsSide,seedsize,HDFOREGROUND);
+//	segmentLocalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
 	
 	
-	//int adaptiveSegBox[6]={tightBox[0],segBox[1],segBox[2],tightBox[3],segBox[4],segBox[5]};
-	//lambda_xy=segmentAdaptiveLambdaXY(img,dims,adaptiveSegBox,tightBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
-	//segmentGlobalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
-	//
+	setValueInsideCube<uchar>(mask,dims,box,HDBACKGROUND);
+	setValueInsideCube<uchar>(mask,dims,box_fg,BACKGROUND);
+	setValueInsideCube<uchar>(mask,dims,tightBox,FOREGROUND);
+	setMaskCircularSeeds(mask,seeds2D,seedsize,HDFOREGROUND);	
+	int s=tightBox[0]; int r=(tightBox[1]+tightBox[4])/2;  int c=(tightBox[2]+tightBox[5])/2;
+	mask[s][r][c]=HDFOREGROUND;
+	int adaptiveSegBox[6]={tightBox[0],segBox[1],segBox[2],tightBox[3],segBox[4],segBox[5]};
+	lambda_xy=segmentAdaptiveLambdaXY(img,dims,adaptiveSegBox,tightBox,spacing,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+	
+	
+	//reset the mask for the whole volume
+//	setMaskShiftBoxWithFgHdCst(mask,dims,box_fg,seeds2D,1);
+	setValueInsideCube<uchar>(mask,dims,box,HDBACKGROUND);
+	setValueInsideCube<uchar>(mask,dims,box_fg,FOREGROUND);
+	setMaskCircularSeeds(mask,seeds2D,seedsize,HDFOREGROUND);	
+	segmentLocalHist(img,dims,segBox,spacing,variance,binNum,lambda_xy,lambda_z,2,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+	
 
 //	paraTuningForBinNumGlobalHist(img,dims,segBox,spacing,variance,lambda_xy,lambda_z,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
-	paraTuningForLocalHist(img,dims,segBox,spacing,variance,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
+//	paraTuningForLocalHist(img,dims,segBox,spacing,variance,seeds3D,seeds2D,BinID,pixelID,mask,smoothterm,dataterm,labeling);
 	
-	//float re,pre,fm;
-	//fm=computeFmeasure(gt,labeling,re,pre,box);
-	//printf("recall: %f precision: %f fm: %f \n",re,pre,fm);
-	//recall.push_back(re); precision.push_back(pre); fmeasure.push_back(fm);
+	float re,pre,fm;
+	fm=computeFmeasure(gt,labeling,re,pre,box);
+	printf("recall: %f precision: %f fm: %f \n",re,pre,fm);
+	recall.push_back(re); precision.push_back(pre); fmeasure.push_back(fm);
 
 	free3DMat<uchar>(mask);
 	free3DMat<int>(BinID);
@@ -1270,12 +1339,12 @@ int main(int argc, char **argv)
 {
 
 	//int st,ed;
-   int st=atoi(argv[1]); int ed=atoi(argv[2]);
+   int st=atoi(argv[1]); int ed=atoi(argv[2]); 
    readImgIndice("D:/workspace/project/crop3D/recrop/TOMOB2INT_CROP/image_name.txt");
    
 
    int img_num=0;
-   float lambdaBias=1; float lambda_xy=5, lambda_z=7;
+   float lambdaBias=1; float lambda_xy=5, lambda_z=5;
 
    //string out_file(argv[3]);
    //string outFM=out_path+out_file+"_fm.txt";
@@ -1299,14 +1368,14 @@ int main(int argc, char **argv)
 
 	readInData(string(image_indice[i]));
 	printf("dimension is: %d %d %d\n",dims[0],dims[1],dims[2]);
-	if(dims[0]*dims[1]*dims[2]>60000)  //trained on 65 volumes  
-	{ free3DMat<float>(img); free3DMat<uchar>(gt); printf("image is too large, skip\n"); continue;}
+//	if(dims[0]*dims[1]*dims[2]<=100000 || dims[0]*dims[1]*dims[2]>200000)  //trained on 65 volumes  
+//	{ free3DMat<float>(img); free3DMat<uchar>(gt); printf("image is too large, skip\n"); continue;}
 
 	int box[6]={0,0,0,dims[0]-1,dims[1]-1,dims[2]-1};
 	bmin=min3D<float>(img,box); 
 	bmax=max3D<float>(img,box);
 	//int binNum=(int)(bmax-bmin+1);
-	int binNum=70;
+	int binNum=190;
 
 	clock_t t1,t2;
 	t1=clock();
@@ -1340,11 +1409,11 @@ int main(int argc, char **argv)
    fclose(fidPE);
    */
 
-   //float avgRecall=std::accumulate(recall.begin(),recall.end(),0.0)/recall.size();
-   //float avgPrecision=std::accumulate(precision.begin(),precision.end(),0.0)/precision.size();
-   //float avgFmeasure=std::accumulate(fmeasure.begin(),fmeasure.end(),0.0)/fmeasure.size();
-   //printf("average recall: %f, precision: %f, fmeasure: %f\n",avgRecall, avgPrecision, avgFmeasure);
-
+   float avgRecall=std::accumulate(recall.begin(),recall.end(),0.0)/recall.size();
+   float avgPrecision=std::accumulate(precision.begin(),precision.end(),0.0)/precision.size();
+   float avgFmeasure=std::accumulate(fmeasure.begin(),fmeasure.end(),0.0)/fmeasure.size();
+   printf("average recall: %f, precision: %f, fmeasure: %f\n",avgRecall, avgPrecision, avgFmeasure);
+ //  system("pause");
 	return 1;
 }
 

@@ -9,5 +9,5 @@ typedef char uchar;
 #define SMALL_CONST 0.001
 #define STAR_HUGE 10000.0
 #define THUGE 100.0
-#define HDHUGE 10000.0
+#define HDHUGE 1000000.0
 
